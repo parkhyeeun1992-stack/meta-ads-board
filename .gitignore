@@ -1,0 +1,12 @@
+.env
+.streamlit/secrets.toml
+__pycache__/
+*.pyc
+streamlit_dashboard.log
+.meta_dentist.html
+.tmp_eye/
+.tmp_eye_today/
+react-dashboard/
+react_tailwind_admin_dashboard.tsx
+ad_history.json
+analyzed_ads.json
