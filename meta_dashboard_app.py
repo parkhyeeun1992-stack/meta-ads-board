@@ -1,4 +1,9 @@
+import html
+import json
+import os
 import sqlite3
+import subprocess
+import sys
 from datetime import date
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
@@ -24,18 +29,21 @@ from meta_dashboard_pipeline import (
 WORKDIR = Path(__file__).resolve().parent
 
 CATEGORY_ORDER = [
-    "라미네이트",
+    "남성제모",
+    "여성제모",
     "임플란트",
+    "라미네이트",
+    "리프팅",
+    "안면거상",
+    "피부/쁘띠",
     "눈성형",
     "코성형",
     "가슴성형",
-    "리프팅",
-    "안면거상",
-    "남성제모",
-    "여성제모",
-    "피부과",
-    "안과",
+    "시력교정",
 ]
+DISPLAY_STEP = 10
+COLLECT_STATUS_PATH = WORKDIR / "collect_job_status.json"
+COLLECT_LOG_PATH = WORKDIR / "collect_job.log"
 
 NAV_OPTIONS = ["메인 갤러리", "내 보드"]
 
@@ -57,6 +65,7 @@ def load_ads() -> pd.DataFrame:
                 row_key,
                 ad_id,
                 category,
+                brand_name,
                 page_name,
                 title,
                 body_text,
@@ -64,6 +73,8 @@ def load_ads() -> pd.DataFrame:
                 asset_path,
                 library_url,
                 days_live,
+                days_active,
+                start_date,
                 published_date,
                 media_type,
                 is_saved,
@@ -83,6 +94,8 @@ def load_ads() -> pd.DataFrame:
 
     data["published_date"] = pd.to_datetime(data["published_date"], errors="coerce")
     data["published_date_only"] = data["published_date"].dt.date
+    data["start_date"] = pd.to_datetime(data["start_date"], errors="coerce")
+    data["start_date_only"] = data["start_date"].dt.date
     data["media_type_display"] = data["media_type"].map(MEDIA_TYPE_LABELS).fillna("단일이미지")
     data["search_blob"] = (
         data[["page_name", "title", "body_text"]]
@@ -198,8 +211,14 @@ def inject_styles() -> None:
             border: none !important;
         }
         [data-testid="stTabs"] [role="tablist"] {
+            overflow-x: auto;
+            overflow-y: hidden;
+            flex-wrap: nowrap;
+            white-space: nowrap;
+            scrollbar-width: thin;
             gap: 0.55rem;
             margin-bottom: 1rem;
+            padding-bottom: 0.2rem;
         }
         [data-testid="stTabs"] [role="tab"] {
             border-radius: 999px;
@@ -207,6 +226,7 @@ def inject_styles() -> None:
             border: 1px solid #dde7f3;
             background: #ffffff;
             color: #4b5563;
+            flex: 0 0 auto;
         }
         [data-testid="stTabs"] [aria-selected="true"] {
             background: #eef5ff;
@@ -300,11 +320,107 @@ def normalize_date_range(selected_range: Union[Tuple[date, date], date]) -> Tupl
     return selected_range, selected_range
 
 
+def read_collect_status() -> Dict[str, object]:
+    if not COLLECT_STATUS_PATH.exists():
+        return {}
+    try:
+        return json.loads(COLLECT_STATUS_PATH.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+
+
+def is_collect_running(status: Dict[str, object]) -> bool:
+    pid = status.get("pid")
+    if not pid or status.get("status") != "running":
+        return False
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except Exception:
+        return False
+
+
+def refresh_collect_cache_if_needed(status: Dict[str, object]) -> None:
+    finished_at = status.get("finished_at")
+    if status.get("status") == "done" and finished_at and st.session_state.get("last_collect_finished_at") != finished_at:
+        st.session_state.last_collect_finished_at = finished_at
+        st.cache_data.clear()
+
+
+def start_collect_job(limit_per_category: int = 100) -> None:
+    COLLECT_LOG_PATH.touch(exist_ok=True)
+    with COLLECT_LOG_PATH.open("a", encoding="utf-8") as log_file:
+        process = subprocess.Popen(
+            [sys.executable, str(WORKDIR / "meta_dashboard_collect_job.py"), "--limit-per-category", str(limit_per_category)],
+            cwd=str(WORKDIR),
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+    COLLECT_STATUS_PATH.write_text(
+        json.dumps(
+            {
+                "status": "running",
+                "pid": process.pid,
+                "started_at": date.today().isoformat(),
+                "finished_at": None,
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+
+def render_collect_controls() -> None:
+    status = read_collect_status()
+    running = is_collect_running(status)
+    refresh_collect_cache_if_needed(status)
+
+    st.sidebar.divider()
+    st.sidebar.markdown("##### 데이터 수집")
+    if running:
+        st.sidebar.info("최신 데이터 수집이 서버에서 실행 중입니다.")
+    elif status.get("status") == "done":
+        st.sidebar.success("최근 수집 작업이 완료되었습니다.")
+    elif status.get("status") == "failed":
+        st.sidebar.error("최근 수집 작업이 실패했습니다.")
+    else:
+        st.sidebar.caption("서버에서 직접 Meta 광고 데이터를 다시 수집합니다.")
+
+    if st.sidebar.button(
+        "최신 데이터 수집 시작",
+        type="primary",
+        use_container_width=True,
+        disabled=running,
+    ):
+        start_collect_job(limit_per_category=100)
+        st.rerun()
+
+    if status.get("summary"):
+        summary = status["summary"]
+        total = sum(summary.get("counts", {}).values())
+        st.sidebar.caption(f"최근 수집 결과: {total}개")
+    if COLLECT_LOG_PATH.exists():
+        st.sidebar.caption(f"로그 파일: {COLLECT_LOG_PATH.name}")
+
+
 def initialize_filter_state(default_start: date, default_end: date, default_types: List[str]) -> None:
     st.session_state.setdefault("nav_menu", NAV_OPTIONS[0])
     st.session_state.setdefault("applied_start_date", default_start)
     st.session_state.setdefault("applied_end_date", default_end)
     st.session_state.setdefault("applied_media_types", default_types)
+    st.session_state.setdefault("selected_category", CATEGORY_ORDER[0])
+    st.session_state.setdefault("last_selected_category", st.session_state.selected_category)
+    st.session_state.setdefault("display_limit", DISPLAY_STEP)
+    st.session_state.setdefault("last_nav_menu", st.session_state.nav_menu)
+    if st.session_state.selected_category not in CATEGORY_ORDER:
+        st.session_state.selected_category = CATEGORY_ORDER[0]
+        st.session_state.last_selected_category = CATEGORY_ORDER[0]
+
+
+def reset_display_limit() -> None:
+    st.session_state.display_limit = DISPLAY_STEP
 
 
 def render_sidebar(default_start: date, default_end: date, default_types: List[str]) -> None:
@@ -340,6 +456,9 @@ def render_sidebar(default_start: date, default_end: date, default_types: List[s
             },
         },
     )
+    if selected_menu != st.session_state.last_nav_menu:
+        reset_display_limit()
+        st.session_state.last_nav_menu = selected_menu
     st.session_state.nav_menu = selected_menu
     st.sidebar.divider()
 
@@ -363,6 +482,7 @@ def render_sidebar(default_start: date, default_end: date, default_types: List[s
         st.session_state.applied_start_date = normalized_start
         st.session_state.applied_end_date = normalized_end
         st.session_state.applied_media_types = selected_types or default_types
+        reset_display_limit()
 
 
 def filter_ads(
@@ -373,9 +493,7 @@ def filter_ads(
     saved_only: bool = False,
 ) -> pd.DataFrame:
     filtered = data.copy()
-    filtered = filtered[
-        filtered["published_date_only"].between(start_date, end_date, inclusive="both")
-    ]
+    filtered = filtered[filtered["start_date_only"].between(start_date, end_date, inclusive="both")]
     if selected_types:
         filtered = filtered[filtered["media_type_display"].isin(selected_types)]
     if saved_only:
@@ -401,13 +519,19 @@ def render_header(nav_menu: str) -> None:
 
 
 def image_source_for(record: pd.Series) -> str:
+    image_url = record.get("image_url")
+    if isinstance(image_url, str) and image_url:
+        return image_url
     asset_path = record.get("asset_path")
     if isinstance(asset_path, str) and asset_path:
         return asset_path
-    return record.get("image_url") or ""
+    return ""
 
 
 def live_days(record: pd.Series) -> int:
+    days_active = record.get("days_active")
+    if pd.notna(days_active):
+        return max(1, int(days_active))
     published = record.get("published_date")
     if pd.notna(published):
         return max(1, (date.today() - published.date()).days + 1)
@@ -624,10 +748,14 @@ def maybe_open_dialog(data: pd.DataFrame) -> None:
 
 
 def render_native_card(record: pd.Series, rank: int) -> None:
-    published_date = (
-        record["published_date"].strftime("%Y-%m-%d")
-        if pd.notna(record["published_date"])
-        else "-"
+    started_date = (
+        record["start_date"].strftime("%Y.%m.%d")
+        if pd.notna(record["start_date"])
+        else (
+            record["published_date"].strftime("%Y.%m.%d")
+            if pd.notna(record["published_date"])
+            else "-"
+        )
     )
     running_days = live_days(record)
     with st.container(border=False):
@@ -641,11 +769,11 @@ def render_native_card(record: pd.Series, rank: int) -> None:
             unsafe_allow_html=True,
         )
         st.markdown(
-            f"<div class='gallery-card-meta'>{record['media_type_display']} | {published_date}</div>",
+            f"<div class='gallery-card-meta'>{record['media_type_display']}</div>",
             unsafe_allow_html=True,
         )
         st.markdown(
-            f"<div class='gallery-card-days'>📅 게재 {running_days}일</div>",
+            f"<div class='gallery-card-days'>📅 게재 {running_days}일 ({started_date})</div>",
             unsafe_allow_html=True,
         )
         if st.button(
@@ -659,28 +787,59 @@ def render_native_card(record: pd.Series, rank: int) -> None:
 
 
 def render_gallery(nav_menu: str, data: pd.DataFrame) -> None:
-    tabs = st.tabs(CATEGORY_ORDER)
-    for tab, category in zip(tabs, CATEGORY_ORDER):
-        with tab:
-            category_df = (
-                data[data["category"] == category]
-                .sort_values(["days_live", "published_date", "last_collected_at"], ascending=[False, True, False])
-                .head(10)
-                .reset_index(drop=True)
-            )
-            if category_df.empty:
-                message = "내 보드에 저장된 광고가 없습니다." if nav_menu == "내 보드" else "필터 조건에 맞는 광고가 없습니다."
-                st.markdown(f"<div class='gallery-empty'>{html.escape(message)}</div>", unsafe_allow_html=True)
-                continue
+    category_counts = {
+        category: int(len(data[data["category"].eq(category)]))
+        for category in CATEGORY_ORDER
+    }
+    selected_category = st.segmented_control(
+        "카테고리",
+        options=CATEGORY_ORDER,
+        default=st.session_state.selected_category,
+        format_func=lambda category: f"{category} ({category_counts.get(category, 0)})",
+        selection_mode="single",
+        label_visibility="collapsed",
+        key="selected_category",
+    )
 
-            st.markdown(
-                f"<div class='tab-caption'>{category} 카테고리 광고 {len(category_df)}개</div>",
-                unsafe_allow_html=True,
-            )
-            cols = st.columns(5)
-            for index, (_, row) in enumerate(category_df.iterrows()):
-                with cols[index % 5]:
-                    render_native_card(row, index + 1)
+    if not selected_category:
+        selected_category = CATEGORY_ORDER[0]
+
+    if selected_category != st.session_state.last_selected_category:
+        reset_display_limit()
+        st.session_state.last_selected_category = selected_category
+
+    sorted_df = (
+        data[data["category"].eq(selected_category)]
+        .sort_values(["days_active", "start_date", "last_collected_at"], ascending=[False, True, False])
+        .reset_index(drop=True)
+    )
+    if sorted_df.empty:
+        message = "내 보드에 저장된 광고가 없습니다." if nav_menu == "내 보드" else "필터 조건에 맞는 광고가 없습니다."
+        st.markdown(f"<div class='gallery-empty'>{html.escape(message)}</div>", unsafe_allow_html=True)
+        return
+
+    display_count = min(int(st.session_state.display_limit), len(sorted_df))
+    category_df = sorted_df.iloc[:display_count]
+
+    st.markdown(
+        f"<div class='tab-caption'>{selected_category} 카테고리 광고 {display_count} / {len(sorted_df)}개</div>",
+        unsafe_allow_html=True,
+    )
+    cols = st.columns(5)
+    for index, (_, row) in enumerate(category_df.iterrows()):
+        with cols[index % 5]:
+            render_native_card(row, index + 1)
+
+    if len(sorted_df) > display_count:
+        _, center_col, _ = st.columns([1, 1.6, 1])
+        with center_col:
+            if st.button(
+                f"소재 더보기 ({display_count}/{len(sorted_df)})",
+                key=f"load_more_{nav_menu}_{selected_category}",
+                use_container_width=True,
+            ):
+                st.session_state.display_limit = int(st.session_state.display_limit) + DISPLAY_STEP
+                st.rerun()
 
 
 def main() -> None:
@@ -702,7 +861,7 @@ def main() -> None:
         st.info("아직 저장된 광고가 없습니다.")
         return
 
-    valid_dates = data["published_date_only"].dropna()
+    valid_dates = data["start_date_only"].dropna()
     if valid_dates.empty:
         st.error("게시일시 데이터가 비어 있습니다. 수집 파이프라인을 다시 실행해 주세요.")
         return
@@ -713,6 +872,7 @@ def main() -> None:
 
     initialize_filter_state(default_start, default_end, default_types)
     render_sidebar(default_start, default_end, default_types)
+    render_collect_controls()
 
     filtered = filter_ads(
         data,
