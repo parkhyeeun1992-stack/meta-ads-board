@@ -84,7 +84,7 @@ h1{{font-size:26px;font-weight:700;text-align:center;margin-bottom:12px}}
 .tab-btn{{padding:7px 14px;border-radius:999px;border:1px solid #e2e8f0;cursor:pointer;font-size:13px;background:white;color:#374151;white-space:nowrap}}
 .tab-btn.active{{background:#3b82f6;color:white;border-color:#3b82f6}}
 .media-filter{{display:flex;gap:8px;margin-bottom:16px}}
-.media-btn{{padding:6px 14px;border-radius:8px;border:1px solid #e2e8f0;cursor:pointer;font-size:13px;background:white;color:#374151}}
+.media-btn{{padding:6px 14px;border-radius:999px;border:1px solid #e2e8f0;cursor:pointer;font-size:13px;background:white;color:#374151}}
 .media-btn.active{{background:#1e293b;color:white;border-color:#1e293b}}
 .play-icon{{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:44px;height:44px;border-radius:50%;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center}}
 .play-icon::after{{content:'';border-style:solid;border-width:8px 0 8px 14px;border-color:transparent transparent transparent white;margin-left:3px}}
@@ -154,9 +154,9 @@ h1{{font-size:26px;font-weight:700;text-align:center;margin-bottom:12px}}
   </div>
   <div class="tabs-wrap"><div class="tabs">{tabs}</div></div>
   <div class="media-filter">
-    <button class="media-btn active" id="mf-all" onclick="setMediaFilter('all')">전체</button>
-    <button class="media-btn" id="mf-image" onclick="setMediaFilter('image')">🖼 이미지만</button>
-    <button class="media-btn" id="mf-video" onclick="setMediaFilter('video')">▶ 동영상만</button>
+    <button class="media-btn active" id="mf-all" onclick="setMediaFilter('all')">전체 (<span id="mf-count-all">0</span>)</button>
+    <button class="media-btn" id="mf-image" onclick="setMediaFilter('image')">🖼 이미지 (<span id="mf-count-image">0</span>)</button>
+    <button class="media-btn" id="mf-video" onclick="setMediaFilter('video')">▶ 동영상 (<span id="mf-count-video">0</span>)</button>
   </div>
   <div class="grid" id="grid"></div>
 </div>
@@ -260,13 +260,20 @@ function showCat(btn, cat) {{
 }}
 
 function renderGrid() {{
-  let list;
+  let baseList;
   if (viewMode === 'saved') {{
-    list = ADS.filter(a => savedIds.has(a.id));
+    baseList = ADS.filter(a => savedIds.has(a.id));
   }} else {{
-    list = ADS.filter(a => a.category === currentCat);
-    if (mediaFilter !== 'all') list = list.filter(a => a.media_type === mediaFilter);
+    baseList = ADS.filter(a => a.category === currentCat);
   }}
+  const imgCount = baseList.filter(a => a.media_type !== 'video').length;
+  const vidCount = baseList.filter(a => a.media_type === 'video').length;
+  document.getElementById('mf-count-all').textContent = baseList.length;
+  document.getElementById('mf-count-image').textContent = imgCount;
+  document.getElementById('mf-count-video').textContent = vidCount;
+
+  let list = baseList;
+  if (viewMode !== 'saved' && mediaFilter !== 'all') list = list.filter(a => a.media_type === mediaFilter);
   catAds = list;
   if (viewMode === 'saved' && catAds.length === 0) {{
     document.getElementById('grid').innerHTML = '<div style="grid-column:1/-1;text-align:center;color:#94a3b8;padding:60px 0;font-size:14px">아직 저장한 소재가 없어요. 소재 상세보기에서 "🔖 내 보드 저장"을 눌러보세요.</div>';
