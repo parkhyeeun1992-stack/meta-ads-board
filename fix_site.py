@@ -34,6 +34,7 @@ for r in rows:
     # download_ad_images.py로 로컬에 받아둔 이미지가 있으면 그걸 우선 사용한다.
     local_img = LOCAL_MAP.get(r['row_key'])
     ads.append({
+        'id': r['row_key'],
         'category': (r['category'] or '').strip(),
         'brand_name': r['brand_name'] or '',
         'page_name': r['page_name'] or '',
@@ -44,6 +45,8 @@ for r in rows:
         'days_active': compute_days_active(r['start_date'], int(r['days_active'] or 30)),
         'media_type': r['media_type'] or 'image',
     })
+
+ads.sort(key=lambda a: a['days_active'], reverse=True)
 
 print(f'광고 {len(ads)}개')
 
@@ -86,8 +89,8 @@ h1{{font-size:26px;font-weight:700;text-align:center;margin-bottom:12px}}
 .play-icon{{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:44px;height:44px;border-radius:50%;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center}}
 .play-icon::after{{content:'';border-style:solid;border-width:8px 0 8px 14px;border-color:transparent transparent transparent white;margin-left:3px}}
 .grid{{display:grid;grid-template-columns:repeat(5,1fr);gap:16px}}
-.card{{background:white;border-radius:12px;overflow:hidden;border:1px solid #e2e8f0;cursor:pointer;transition:.2s}}
-.card:hover{{box-shadow:0 4px 16px rgba(0,0,0,.12);transform:translateY(-2px)}}
+.card{{background:white;border-radius:12px;overflow:hidden;border:1px solid #e2e8f0;transition:.2s}}
+.card:hover{{box-shadow:0 2px 8px rgba(0,0,0,.06)}}
 .card-img{{position:relative;height:240px;background:#f1f5f9;overflow:hidden;display:flex;align-items:center;justify-content:center}}
 .card-img img{{width:100%;height:100%;object-fit:contain;display:block}}
 .badge{{position:absolute;top:8px;left:8px;color:white;font-size:11px;font-weight:600;padding:3px 8px;border-radius:999px}}
@@ -101,11 +104,13 @@ h1{{font-size:26px;font-weight:700;text-align:center;margin-bottom:12px}}
 .btn-outline{{background:#f1f5f9;color:#374151}}
 .btn-outline:hover{{background:#e2e8f0}}
 .btn-ai{{background:#eff6ff;color:#3b82f6}}
+.btn-ai:hover{{background:#dbeafe}}
 .modal-overlay{{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1000;align-items:center;justify-content:center}}
 .modal-overlay.open{{display:flex}}
-.modal{{background:white;border-radius:16px;width:90%;max-width:800px;max-height:90vh;overflow-y:auto;position:relative}}
-.modal-close{{position:absolute;top:16px;right:16px;background:#f1f5f9;border:none;border-radius:50%;width:32px;height:32px;font-size:18px;cursor:pointer}}
-.modal-img{{width:100%;max-height:450px;object-fit:contain;background:#f8fafc}}
+.modal{{background:white;border-radius:16px;width:94%;max-width:1100px;max-height:94vh;overflow-y:auto;position:relative}}
+.modal-close{{position:absolute;top:16px;right:16px;background:#f1f5f9;border:none;border-radius:50%;width:32px;height:32px;font-size:18px;cursor:pointer;z-index:2}}
+.modal-save-icon{{position:absolute;top:16px;right:60px;background:#f1f5f9;border:none;border-radius:50%;width:32px;height:32px;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:2}}
+.modal-img{{width:100%;max-height:640px;object-fit:contain;background:#f8fafc}}
 .modal-body{{padding:24px}}
 .modal-title{{font-size:18px;font-weight:700;margin-bottom:8px}}
 .modal-meta{{font-size:13px;color:#64748b;margin-bottom:16px}}
@@ -113,7 +118,10 @@ h1{{font-size:26px;font-weight:700;text-align:center;margin-bottom:12px}}
 .modal-btn{{flex:1;padding:10px;border-radius:8px;font-size:14px;border:none;cursor:pointer;font-weight:500;text-align:center;text-decoration:none;display:block}}
 .modal-btn-outline{{background:#f1f5f9;color:#374151}}
 .modal-btn-ai{{background:#3b82f6;color:white}}
-.modal-video{{width:100%;max-height:450px;background:#000;display:none}}
+.modal-btn-saved{{background:#3b82f6;color:white;border:1px solid #3b82f6}}
+.toast{{position:fixed;bottom:28px;left:50%;transform:translateX(-50%) translateY(20px);background:#1e293b;color:white;padding:11px 20px;border-radius:999px;font-size:13px;font-weight:500;box-shadow:0 6px 20px rgba(0,0,0,.2);z-index:2000;opacity:0;pointer-events:none;transition:opacity .25s,transform .25s}}
+.toast.show{{opacity:1;transform:translateX(-50%) translateY(0)}}
+.modal-video{{width:100%;max-height:640px;background:#000;display:none}}
 .ai-modal-box{{max-width:640px}}
 .ai-src-row{{display:flex;gap:12px;align-items:center;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px;margin-bottom:16px}}
 .ai-src-thumb{{width:56px;height:56px;object-fit:cover;border-radius:8px;background:#f1f5f9;flex-shrink:0}}
@@ -137,12 +145,13 @@ h1{{font-size:26px;font-weight:700;text-align:center;margin-bottom:12px}}
 <div class="layout">
 <div class="sidebar">
   <div style="font-size:13px;font-weight:600;color:#64748b;margin-bottom:12px">메뉴</div>
-  <a class="active">메인 갤러리</a>
-  <a>내 보드</a>
+  <a class="active" id="nav-main-gallery" onclick="showMainGallery()">메인 갤러리</a>
+  <a id="nav-my-board" onclick="showMyBoard()">내 보드</a>
 </div>
 <div class="main">
   <h1>고효율 메타 광고 생존 보드</h1>
-  <div class="notice">📅 마지막 업데이트: {TODAY} · 이 보드는 1주마다 수동으로 업데이트됩니다. 최신 소재는 <a href="https://www.facebook.com/ads/library" target="_blank">메타 광고 라이브러리</a>에서 직접 확인해주세요.</div>
+  <div class="notice">📅 마지막 업데이트: {TODAY} · 이 보드는 매주 월요일 오전 11시 자동으로 업데이트됩니다. 최신 소재는 <a href="https://www.facebook.com/ads/library" target="_blank">메타 광고 라이브러리</a>에서 직접 확인해주세요. <button id="manual-update-btn" onclick="triggerManualUpdate()" style="margin-left:4px;padding:5px 12px;border-radius:999px;border:none;background:#eff6ff;color:#3b82f6;font-size:12px;font-weight:600;cursor:pointer">🔄 지금 업데이트</button>
+  </div>
   <div class="tabs-wrap"><div class="tabs">{tabs}</div></div>
   <div class="media-filter">
     <button class="media-btn active" id="mf-all" onclick="setMediaFilter('all')">전체</button>
@@ -152,6 +161,7 @@ h1{{font-size:26px;font-weight:700;text-align:center;margin-bottom:12px}}
   <div class="grid" id="grid"></div>
 </div>
 </div>
+<div class="toast" id="toast"></div>
 <div class="modal-overlay" id="modal" onclick="if(event.target===this)closeModal()">
   <div class="modal">
     <button class="modal-close" onclick="closeModal()">✕</button>
@@ -161,7 +171,8 @@ h1{{font-size:26px;font-weight:700;text-align:center;margin-bottom:12px}}
       <div class="modal-title" id="modal-title"></div>
       <div class="modal-meta" id="modal-meta"></div>
       <div class="modal-btns">
-        <a class="modal-btn modal-btn-outline" id="modal-link" href="#" target="_blank">🔗 메타 원문 보기</a>
+        <a class="modal-btn modal-btn-outline" id="modal-link" href="#" target="_blank">🔗 메타 원본 링크 보기</a>
+        <button class="modal-btn modal-btn-outline" id="modal-save-btn" onclick="toggleSaveCurrent()">🔖 내 보드 저장</button>
         <button class="modal-btn modal-btn-ai" id="modal-ai-btn" onclick="openAiPlanModalFromDetail()">✨ AI소재 기획 (beta)</button>
       </div>
     </div>
@@ -209,6 +220,30 @@ const ADS = {ads_json};
 let catAds = [];
 let currentCat = '{first_cat}';
 let mediaFilter = 'all';
+let viewMode = 'gallery'; // 'gallery' | 'saved'
+let savedIds = new Set(JSON.parse(localStorage.getItem('saved_ads') || '[]'));
+
+function persistSavedIds() {{
+  localStorage.setItem('saved_ads', JSON.stringify(Array.from(savedIds)));
+}}
+
+function showMainGallery() {{
+  viewMode = 'gallery';
+  document.getElementById('nav-main-gallery').classList.add('active');
+  document.getElementById('nav-my-board').classList.remove('active');
+  document.querySelector('.tabs-wrap').style.display = '';
+  document.querySelector('.media-filter').style.display = '';
+  renderGrid();
+}}
+
+function showMyBoard() {{
+  viewMode = 'saved';
+  document.getElementById('nav-main-gallery').classList.remove('active');
+  document.getElementById('nav-my-board').classList.add('active');
+  document.querySelector('.tabs-wrap').style.display = 'none';
+  document.querySelector('.media-filter').style.display = 'none';
+  renderGrid();
+}}
 
 function setMediaFilter(mode) {{
   mediaFilter = mode;
@@ -225,9 +260,18 @@ function showCat(btn, cat) {{
 }}
 
 function renderGrid() {{
-  let list = ADS.filter(a => a.category === currentCat);
-  if (mediaFilter !== 'all') list = list.filter(a => a.media_type === mediaFilter);
+  let list;
+  if (viewMode === 'saved') {{
+    list = ADS.filter(a => savedIds.has(a.id));
+  }} else {{
+    list = ADS.filter(a => a.category === currentCat);
+    if (mediaFilter !== 'all') list = list.filter(a => a.media_type === mediaFilter);
+  }}
   catAds = list;
+  if (viewMode === 'saved' && catAds.length === 0) {{
+    document.getElementById('grid').innerHTML = '<div style="grid-column:1/-1;text-align:center;color:#94a3b8;padding:60px 0;font-size:14px">아직 저장한 소재가 없어요. 소재 상세보기에서 "🔖 내 보드 저장"을 눌러보세요.</div>';
+    return;
+  }}
   document.getElementById('grid').innerHTML = catAds.map((a,i) => {{
     const img = a.imageUrl || '';
     const isVideo = a.media_type === 'video';
@@ -235,7 +279,7 @@ function renderGrid() {{
     const bg = days >= 40 ? 'rgba(34,197,94,.9)' : 'rgba(249,115,22,.9)';
     const brand = (a.brand_name || a.page_name || '??').substring(0,2).toUpperCase();
     const lib = a.library_url || '';
-    return '<div class="card" onclick="openModal(' + i + ')">'
+    return '<div class="card">'
       + '<div class="card-img">'
       + '<img src="' + img + '" onerror="this.closest(\\'.card\\').remove()">'
       + (isVideo ? '<div class="play-icon"></div>' : '')
@@ -246,7 +290,7 @@ function renderGrid() {{
       + '<div class="brand-name">' + (a.brand_name || a.page_name || '') + '</div></div>'
       + '<div class="card-meta">유형: ' + (isVideo ? '동영상(Video)' : '단일이미지(Image)') + ' · (' + a.start_date + ')</div>'
       + '<div class="card-btns">'
-      + '<button class="btn btn-outline" onclick="event.stopPropagation();' + (lib ? 'window.open(\\'' + lib + '\\',\\'_blank\\')' : '') + '">자세히 보기</button>'
+      + '<button class="btn btn-outline" onclick="event.stopPropagation();openModal(' + i + ')">자세히 보기</button>'
       + '<button class="btn btn-ai" onclick="event.stopPropagation();openAiPlanModal(' + i + ')">✨ AI소재 기획 (beta)</button>'
       + '</div></div></div>';
   }}).join('');
@@ -273,7 +317,36 @@ function openModal(idx) {{
   document.getElementById('modal-title').textContent = a.brand_name || a.page_name || '';
   document.getElementById('modal-meta').textContent = '유형: ' + (a.media_type === 'video' ? '동영상' : '이미지') + ' · 게재 시작: ' + a.start_date + ' · ' + a.days_active + '일 생존';
   document.getElementById('modal-link').href = a.library_url || '#';
+  updateSaveButton(a.id);
   document.getElementById('modal').classList.add('open');
+}}
+function updateSaveButton(id) {{
+  const btn = document.getElementById('modal-save-btn');
+  const saved = savedIds.has(id);
+  btn.textContent = saved ? '✅ 내 보드에 저장됨' : '🔖 내 보드 저장';
+  btn.classList.toggle('modal-btn-saved', saved);
+}}
+function toggleSaveCurrent() {{
+  const a = catAds[currentModalIdx];
+  if (!a) return;
+  if (savedIds.has(a.id)) {{
+    savedIds.delete(a.id);
+    showToast('내 보드에서 삭제되었습니다');
+  }} else {{
+    savedIds.add(a.id);
+    showToast('내 보드에 저장되었습니다');
+  }}
+  persistSavedIds();
+  updateSaveButton(a.id);
+  if (viewMode === 'saved') renderGrid();
+}}
+let toastTimer = null;
+function showToast(msg) {{
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2000);
 }}
 function closeModal() {{
   document.getElementById('modal-video').pause();
@@ -410,6 +483,24 @@ function renderPlan(box, plan) {{
 }}
 
 document.getElementById('tab-{first_cat}').click();
+
+async function triggerManualUpdate() {{
+  const btn = document.getElementById('manual-update-btn');
+  if (btn.disabled) return;
+  if (!confirm('메타에서 최신 광고를 다시 수집해서 사이트를 업데이트할까요? 3~5분 정도 걸려요.')) return;
+  btn.disabled = true;
+  btn.textContent = '⏳ 업데이트 요청 중...';
+  try {{
+    const res = await fetch('/.netlify/functions/trigger-update', {{ method: 'POST' }});
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '요청 실패');
+    btn.textContent = '✅ 업데이트 시작됨 (3~5분 후 새로고침)';
+  }} catch (err) {{
+    btn.textContent = '🔄 지금 업데이트';
+    btn.disabled = false;
+    alert('업데이트 요청 실패: ' + (err.message || '알 수 없는 오류'));
+  }}
+}}
 </script>
 </body>
 </html>''')
