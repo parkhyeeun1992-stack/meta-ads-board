@@ -1,0 +1,45 @@
+name: Weekly Meta Ads Update
+
+on:
+  schedule:
+    # 매주 월요일 11:00 KST = 02:00 UTC
+    - cron: '0 2 * * 1'
+  workflow_dispatch: {}
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install python deps
+        run: pip install playwright requests
+
+      - name: Install chromium
+        run: python -m playwright install --with-deps chromium
+
+      - name: Scrape Meta Ads Library
+        run: python playwright_scraper.py
+
+      - name: Download images locally
+        run: python download_ad_images.py
+
+      - name: Build static site
+        run: python fix_site.py
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Netlify CLI
+        run: npm install -g netlify-cli
+
+      - name: Deploy to Netlify
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+        run: netlify deploy --dir=netlify-deploy --functions=netlify-functions --prod
